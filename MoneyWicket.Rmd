@@ -1,0 +1,586 @@
+---
+title: "MoneyWicket"
+author: "Joseph Ellis, Abhiram Reddy"
+subtitle: 
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+---
+
+```{r setup, include=FALSE}
+
+library(knitr)
+
+set.seed(2077)
+options(width=70)
+options(scipen=99)
+
+opts_chunk$set(tidy.opts=list(width.wrap=50),tidy=TRUE, size = "vsmall")  
+opts_chunk$set(message = FALSE,                                          
+               warning = FALSE,
+               cache = FALSE,                               
+               autodep = TRUE,
+               cache.comments = FALSE,
+               collapse = TRUE,
+               fig.width = 5.5,  
+               fig.height = 4.5,
+               fig.align='center')
+
+```
+
+```{r setup-2}
+
+sessionInfo()
+getwd()
+
+```
+
+```{r setup-3}
+
+library('tidyverse')
+library('readr')
+library('dplyr')
+library('forcats')
+library('ggplot2')
+library('ggrepel')
+library('sjPlot')
+library('plotROC')
+library('rsample')
+library('glmnet')
+library('glmnetUtils')
+library('vtable')
+library('yardstick')
+library('caret')
+library('arm')
+library('GGally')
+library('repr')
+
+```
+
+```{r}
+
+bowling_IPL <- read.csv("bowling_IPL.csv")
+batting_IPL <- read.csv("batting_IPL.csv")
+
+for (row in 1:nrow(bowling_IPL)) {
+  num <- str_split_fixed(bowling_IPL$BBI[row], "/", n = 2)
+  bbi = as.numeric(unlist(num[1])) / as.numeric(unlist(num[2]))
+  bowling_IPL$BBI[row] <- round(bbi, digits = 2)
+}
+
+bowling_IPL <- bowling_IPL %>%
+  mutate(bowling_IPL, 
+          BBI = as.numeric(BBI),
+          top_player = 0) %>%
+  filter(Mat > 4)
+
+bowling_IPL <- bowling_IPL %>%
+  mutate(bowling_IPL,
+         top_player = ifelse((
+          (Runs < mean(bowling_IPL$Runs, na.rm = TRUE) + 2*sd(bowling_IPL$Runs)) & 
+          (Wkts > mean(bowling_IPL$Wkts, na.rm = TRUE) - sd(bowling_IPL$Wkts)) & 
+          (Avg < mean(bowling_IPL$Avg, na.rm = TRUE) + sd(bowling_IPL$Avg)) & 
+          (Econ < mean(bowling_IPL$Econ, na.rm = TRUE) + sd(bowling_IPL$Econ)) & 
+          (SR < mean(bowling_IPL$SR, na.rm = TRUE) + sd(bowling_IPL$SR)) &
+          (BBI < mean(bowling_IPL$BBI, na.rm = TRUE) + sd(bowling_IPL$BBI))
+          ), 1, 0)) %>%
+  filter(Mat > 4)
+
+bowling_IPL[is.na(bowling_IPL)] <- 0
+
+bowling_IPL <- bowling_IPL %>%
+  mutate(top_player = as.factor(top_player))
+
+batting_IPL <- batting_IPL %>%
+  mutate(batting_IPL, 
+         HS = as.numeric(gsub("\\*", "", HS)),
+         Avg = ifelse(Avg == '-', 0, as.numeric(Avg)),
+         top_player = ifelse((
+        (Runs < mean(batting_IPL$Runs, na.rm = TRUE)) & 
+        (HS < mean(batting_IPL$HS, na.rm = TRUE)) &
+        (Avg < mean(batting_IPL$Avg, na.rm = TRUE)) & 
+        (SR < mean(batting_IPL$SR, na.rm = TRUE)) & 
+        (X4s < mean(batting_IPL$X4s, na.rm = TRUE))
+        ), 0, 1)) %>%
+  filter(Mat > 4)
+
+batting_IPL[is.na(batting_IPL)] <- 0
+
+batting_IPL <- batting_IPL %>%
+  mutate(top_player = as.factor(top_player))
+
+bowling_IPL <- bowling_IPL[complete.cases(bowling_IPL),]
+batting_IPL <- batting_IPL[complete.cases(batting_IPL),]
+
+batting_split <- initial_split(batting_IPL, prop = 0.75)
+batting_train <- training(batting_split)
+batting_test <- testing(batting_split)
+
+bowling_split <- initial_split(bowling_IPL, prop = 0.75)
+bowling_train <- training(bowling_split)
+bowling_test <- testing(bowling_split)
+
+view(batting_IPL)
+view(bowling_IPL)
+```
+
+Statistics for IPL Bowlers
+
+```{r}
+
+st(bowling_IPL)
+
+```
+
+Statistics for IPL Batters
+
+```{r}
+
+st(batting_IPL)
+
+```
+
+Plotting Top Player Comparison
+
+```{r}
+
+ggplot(data = bowling_IPL, aes(x = top_player, y = Wkts, group = top_player)) +
+  geom_boxplot() + labs(title = 'Amount of Wickets Taken versus Top Player Status for Bowlers', x = 'Top Player', y = 'Amount of Wickets')
+
+ggplot(data = batting_IPL, aes(x = top_player, y = Runs, group = top_player)) +
+  geom_boxplot() + labs(title = 'Amount of Runs versus Top Player Status for Batters', x = 'Top Player', y = 'Amount of Runs')
+
+```
+
+
+Logistic Regression Model for Predicting Top Player Statistics
+
+```{r}
+
+bowlingLm <- glm(top_player ~ Mat + Ov + Runs + Wkts + Avg + Econ + BBI + SR,
+                 family = binomial,
+                data = bowling_train)
+
+battingLm <- glm(top_player ~ Mat + NO + Avg + HS + Runs + BF + SR + X4s + X6s,
+                family = binomial,
+              data = batting_train)
+
+battingBayes <- bayesglm(top_player ~ Mat + NO + Avg + HS + Runs + BF + SR + X4s + X6s,
+                family = binomial(link = "logit"),
+                data = batting_train)
+
+```
+
+Bowling LM Summary
+
+```{r}
+
+summary(bowlingLm)
+
+exp(bowlingLm$coefficients)
+
+```
+
+
+Batting LM Summary
+
+```{r}
+options("scipen"=100)
+summary(battingLm)
+
+exp(battingLm$coefficients)
+
+summary(battingBayes)
+
+exp(battingBayes$coefficients)
+
+```
+
+Making Test and Train Prediction Tibbles
+
+```{r}
+
+bowling_preds_train <- predict(bowlingLm, newdata = bowling_train, type="response")
+
+bowling_preds_test <- predict(bowlingLm, newdata = bowling_test, type="response")
+
+bowling_results_train <- 
+  tibble(
+    `cmtruth` = as.factor(bowling_train$top_player),
+    `roctruth` = as.numeric(bowling_train$top_player),
+    `Class1` = bowling_preds_train,
+    `Class2` = 1 - bowling_preds_train,
+    `predicted` = as.factor(ifelse(bowling_preds_train > 0.4, 1, 0)))
+
+bowling_results_test <- 
+  tibble(
+    `cmtruth` = as.factor(bowling_test$top_player),
+    `roctruth` = as.numeric(bowling_test$top_player),
+    `Class1` = bowling_preds_test,
+    `Class2` = 1 - bowling_preds_test,
+    `predicted` = as.factor(ifelse(bowling_preds_test > 0.4, 1, 0)))
+
+
+batting_preds_train <- predict(battingLm, newdata = batting_train, type = "response")
+
+batting_preds_test <- predict(battingLm, newdata = batting_test, type = "response")
+
+bayes_preds_train <- predict(battingBayes, newdata = batting_train, type = "response")
+
+bayes_preds_test <- predict(battingBayes, newdata = batting_test, type = "response")
+
+batting_results_train <- 
+  tibble(
+    `cmtruth` = as.factor(batting_train$top_player),
+    `roctruth` = as.numeric(batting_train$top_player),
+    `Class1` = batting_preds_train,
+    `Class2` = 1 - batting_preds_train,
+    `predicted` = as.factor(ifelse(batting_preds_train > 0.4, 1, 0)))
+
+batting_results_test <- 
+  tibble(
+    `cmtruth` = as.factor(batting_test$top_player),
+    `roctruth` = as.numeric(batting_test$top_player),
+    `Class1` = batting_preds_test,
+    `Class2` = 1 - batting_preds_test,
+    `predicted` = as.factor(ifelse(batting_preds_test > 0.4, 1, 0)))
+
+bayes_results_train <- 
+  tibble(
+    `cmtruth` = as.factor(batting_train$top_player),
+    `roctruth` = as.numeric(batting_train$top_player),
+    `Class1` = batting_preds_train,
+    `Class2` = 1 - batting_preds_train,
+    `predicted` = as.factor(ifelse(bayes_preds_train > 0.4, 1, 0)))
+
+bayes_results_test <- 
+  tibble(
+    `cmtruth` = as.factor(batting_test$top_player),
+    `roctruth` = as.numeric(batting_test$top_player),
+    `Class1` = batting_preds_test,
+    `Class2` = 1 - batting_preds_test,
+    `predicted` = as.factor(ifelse(bayes_preds_test > 0.4, 1, 0)))
+
+
+
+```
+
+Making ROC Graphs for Bowling and Batting Predictions
+
+```{r}
+
+bowling_train_roc <- ggplot(bowling_results_train, 
+            aes(m = Class1, d = roctruth)) + 
+  geom_roc(labelsize = 3.5, 
+           cutoffs.at = 
+             c(0.99,0.9,0.7,0.5,0.3,0.1,0)) +
+  theme_minimal(base_size = 16)
+
+bowling_test_roc <- ggplot(bowling_results_test, 
+            aes(m = Class1, d = roctruth)) + 
+  geom_roc(labelsize = 3.5, 
+           cutoffs.at = 
+             c(0.99,0.9,0.7,0.5,0.3,0.1,0)) +
+  theme_minimal(base_size = 16)
+
+batting_train_roc <- ggplot(batting_results_train, 
+            aes(m = Class1, d = roctruth)) + 
+  geom_roc(labelsize = 3.5, 
+           cutoffs.at = 
+             c(0.99,0.9,0.7,0.5,0.3,0.1,0)) +
+  theme_minimal(base_size = 16)
+
+batting_test_roc <- ggplot(batting_results_test, 
+            aes(m = Class1, d = roctruth)) + 
+  geom_roc(labelsize = 3.5, 
+           cutoffs.at = 
+             c(0.99,0.9,0.7,0.5,0.3,0.1,0)) +
+  theme_minimal(base_size = 16)
+
+bayes_train_roc <- ggplot(bayes_results_train, 
+            aes(m = Class1, d = roctruth)) + 
+  geom_roc(labelsize = 3.5, 
+           cutoffs.at = 
+             c(0.99,0.9,0.7,0.5,0.3,0.1,0)) +
+  theme_minimal(base_size = 16)
+
+bayes_test_roc <- ggplot(bayes_results_test, 
+            aes(m = Class1, d = roctruth)) + 
+  geom_roc(labelsize = 3.5, 
+           cutoffs.at = 
+             c(0.99,0.9,0.7,0.5,0.3,0.1,0)) +
+  theme_minimal(base_size = 16)
+
+```
+
+Making Confusion Matrices for Bowling and Batting Predictions
+
+```{r}
+
+bowling_train_cm <- conf_mat(bowling_results_train,
+                            truth = cmtruth,
+                            estimate = predicted)
+
+bowling_test_cm <- conf_mat(bowling_results_test,
+                            truth = cmtruth,
+                            estimate = predicted)
+
+batting_train_cm <- conf_mat(batting_results_train,
+                             truth = cmtruth,
+                             estimate = predicted)
+batting_test_cm <- conf_mat(batting_results_test,
+                            truth = cmtruth,
+                            estimate = predicted)
+
+bayes_train_cm <- conf_mat(bayes_results_train,
+                             truth = cmtruth,
+                             estimate = predicted)
+bayes_test_cm <- conf_mat(bayes_results_test,
+                            truth = cmtruth,
+                            estimate = predicted)
+
+```
+
+
+Bowling ROC Graphs
+
+```{r}
+
+print(bowling_train_roc)
+
+print(bowling_test_roc)
+
+```
+
+Batting ROC Graphs
+
+```{r}
+
+print(batting_train_roc)
+
+print(batting_test_roc)
+
+print(bayes_train_roc)
+
+print(bayes_test_roc)
+
+```
+
+Bowling AUC Scores
+
+```{r}
+
+calc_auc(bowling_train_roc)
+
+calc_auc(bowling_test_roc)
+
+```
+
+Batting AUC Scores
+
+```{r}
+
+calc_auc(batting_train_roc)
+
+calc_auc(batting_test_roc)
+
+calc_auc(bayes_train_roc)
+
+calc_auc(bayes_test_roc)
+
+```
+
+Bowling Prediction Confusion Matrices
+
+```{r}
+
+autoplot(bowling_train_cm, "heatmap")
+
+autoplot(bowling_test_cm, "heatmap")
+
+```
+
+Batting Prediction Confusion Matrices
+
+```{r}
+
+autoplot(batting_train_cm, "heatmap")
+
+autoplot(batting_test_cm, "heatmap")
+
+autoplot(bayes_train_cm, "heatmap")
+
+autoplot(bayes_test_cm, "heatmap")
+
+```
+
+Ridge Model Creation For Bowling
+
+```{r}
+ridge_bowling <- cv.glmnet(Econ ~ Mat + Ov + Runs + Wkts + Avg + Runs + BBI + SR,
+                       data = bowling_train,
+                       alpha = 0)
+
+ridgeBow_mse <- ridge_bowling$cvm[ridge_bowling$lambda == ridge_bowling$lambda.min]
+print(ridgeBow_mse)
+print(ridge_bowling$lambda.min)
+
+```
+
+Plot
+
+```{r}
+plot(ridge_bowling)
+```
+
+
+Coefficients Of Lambdamin and Lambda.1se
+
+```{r}
+print(coef(ridge_bowling, s = ridge_bowling$lambda.min) %>% 
+  round(3))
+
+print(coef(ridge_bowling, s = ridge_bowling$lambda.1se) %>% 
+  round(3))
+
+```
+
+
+For Batting
+
+```{r}
+ridge_batting <- cv.glmnet(Runs ~ Mat + NO + Avg + HS + Runs + BF + SR + X4s + X6s,
+                       data = batting_train,
+                       alpha = 0)
+
+ridgeBat_mse <- ridge_batting$cvm[ridge_batting$lambda == ridge_batting$lambda.min]
+print(ridgeBat_mse)
+print(ridge_batting$lambda.min)
+
+```
+
+Plot
+
+```{r}
+plot(ridge_batting)
+```
+Coefficients Of Lambdamin and Lambda.1se
+
+```{r}
+print(coef(ridge_batting, s = ridge_batting$lambda.min) %>% 
+  round(3))
+
+print(coef(ridge_batting, s = ridge_batting$lambda.1se) %>% 
+  round(3))
+
+
+```
+
+
+```{r}
+
+plot(ridge_batting)
+
+```
+
+
+Lasso Model Creation For Bowling
+
+```{r}
+
+lasso_bowling <- cv.glmnet(Econ ~ Mat + Ov + Runs + Wkts + Avg + BBI + SR,
+                       data = bowling_train,
+                       alpha = 1)
+
+lassoBow_mse <- lasso_bowling$cvm[lasso_bowling$lambda == lasso_bowling$lambda.min]
+print(lassoBow_mse)
+print(lasso_bowling$lambda.min)
+
+```
+
+
+Plot Lasso Model
+
+```{r}
+plot(lasso_bowling)
+```
+
+
+Coefficients Of Lambdamin and Lambda.1se
+
+```{r}
+
+print(coef(lasso_bowling, s = lasso_bowling$lambda.1se))
+print(coef(lasso_bowling, s = lasso_bowling$lambda.min))
+
+```
+
+
+Lasso Model Creation For Batting
+
+```{r}
+
+lasso_batting <- cv.glmnet(Runs ~ Mat + NO + Avg + HS + Runs + BF + SR + X4s + X6s,
+                       data = batting_train,
+                       alpha = 1)
+
+lassoBat_mse <- lasso_batting$cvm[lasso_batting$lambda == lasso_batting$lambda.min]
+print(lassoBat_mse)
+print(lasso_batting$lambda.min)
+
+```
+
+
+Plot Lasso Model
+
+```{r}
+plot(lasso_batting)
+```
+
+Coefficients Of Lambdamin and Lambda.1se
+
+```{r}
+
+print(coef(lasso_batting, s = lasso_batting$lambda.1se))
+print(coef(lasso_batting, s = lasso_batting$lambda.min))
+
+```
+
+Minlossplots
+
+```{r}
+bowling_enet <- cva.glmnet(Econ ~ Mat + Ov + Runs + Wkts + Avg + Runs + BBI + SR,
+                       data = bowling_train,
+                       alpha = seq(0,1, by = 0.05))
+
+batting_enet <- cva.glmnet(Runs ~ Mat + NO + Avg + HS + Runs + BF + SR + X4s + X6s,
+                       data = batting_train,
+                       alpha = seq(0,1, by = 0.05))
+
+minlossplot(bowling_enet, cv.type="min")
+
+minlossplot(batting_enet, cv.type="min")
+
+```
+
+Training vs Testing Set MSEs for Lasso Models
+
+```{r}
+
+lassoBowl_pred <- predict(lasso_bowling, s = lasso_bowling$lambda.min, newdata = bowling_test, type = "response")
+Bowltest_mse <- mean((lassoBowl_pred - bowling_test$Econ)^2)
+
+lassoBat_pred <- predict(lasso_batting, s = lasso_batting$lambda.min, newdata = batting_test, type = "response")
+Battest_mse <- mean((lassoBat_pred - batting_test$Runs)^2)
+
+
+cat("Lasso Bowling Model MSEs: \n")
+cat("Training Set: ", lassoBow_mse, "\n")
+cat("Testing Set: ", Bowltest_mse, "\n")
+cat("\n")
+cat("Lasso Batting Model MSEs: \n")
+cat("Training Set: ", lassoBat_mse, "\n")
+cat("Testing Set: ", Battest_mse, "\n")
+
+```
