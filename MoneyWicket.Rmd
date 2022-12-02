@@ -554,7 +554,7 @@ bowling_enet <- cva.glmnet(Econ ~ Mat + Ov + Runs + Wkts + Avg + Runs + BBI + SR
                        data = bowling_train,
                        alpha = seq(0,1, by = 0.05))
 
-batting_enet <- cva.glmnet(Runs ~ Mat + NO + Avg + HS + Runs + BF + SR + X4s + X6s,
+batting_enet <- cva.glmnet(Runs ~ Mat + NO + Avg + HS + BF + SR + X4s + X6s,
                        data = batting_train,
                        alpha = seq(0,1, by = 0.05))
 
