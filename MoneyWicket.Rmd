@@ -450,7 +450,7 @@ print(coef(ridge_bowling, s = ridge_bowling$lambda.1se) %>%
 For Batting
 
 ```{r}
-ridge_batting <- cv.glmnet(Runs ~ Mat + NO + Avg + HS + Runs + BF + SR + X4s + X6s,
+ridge_batting <- cv.glmnet(Runs ~ Mat + NO + Avg + HS + BF + SR + X4s + X6s,
                        data = batting_train,
                        alpha = 0)
 
@@ -521,7 +521,7 @@ Lasso Model Creation For Batting
 
 ```{r}
 
-lasso_batting <- cv.glmnet(Runs ~ Mat + NO + Avg + HS + Runs + BF + SR + X4s + X6s,
+lasso_batting <- cv.glmnet(Runs ~ Mat + NO + Avg + HS + BF + SR + X4s + X6s,
                        data = batting_train,
                        alpha = 1)
 
